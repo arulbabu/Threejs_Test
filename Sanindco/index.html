@@ -36,21 +36,48 @@
 
 		<script src="build/three.js"></script>
 
-		<script src="js/libs/inflate.min.js"></script>
+		<script src="js/postprocessing/EffectComposer.js"></script>
+		<script src="js/postprocessing/RenderPass.js"></script>
+		<script src="js/postprocessing/ShaderPass.js"></script>
+		<script src="js/postprocessing/SAOPass.js"></script>
+
+		<script src="js/shaders/CopyShader.js"></script>
+		<script src="js/shaders/SAOShader.js"></script>
+		<script src="js/shaders/DepthLimitedBlurShader.js"></script>
+		<script src="js/shaders/UnpackDepthRGBAShader.js"></script>
+
 		<script src="js/loaders/FBXLoader.js"></script>
+		<script src="js/loaders/RGBELoader.js"></script>
+		<script src="js/loaders/HDRCubeTextureLoader.js"></script>
 
 		<script src="js/controls/OrbitControls.js"></script>
 
 		<script src="js/Detector.js"></script>
+
+		<script src="js/pmrem/PMREMGenerator.js"></script>
+		<script src="js/pmrem/PMREMCubeUVPacker.js"></script>
+
 		<script src="js/libs/stats.min.js"></script>
+		<script src="js/libs/dat.gui.min.js"></script>
+		<script src="js/libs/inflate.min.js"></script>
 
 		<script>
 
 			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
 
 			var container, stats, controls;
-			var camera, scene, renderer, light;
 
+			var params = {
+				envMap: 'HDR',
+				roughness: 0.0,
+				metalness: 0.0,
+				exposure: 1.0
+			};
+
+
+
+			var camera, scene, renderer, light;
+var standardMaterial, floorMaterial;
 			var clock = new THREE.Clock();
 
 			var mixers = [];
@@ -63,18 +90,21 @@
 				container = document.createElement( 'div' );
 				document.body.appendChild( container );
 
-				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 2, 1000 );
-				camera.position.set( 100, 600, 300 );
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 100, 10000 );
+				camera.position.set( -1000, 400, 800 );
 
 				controls = new THREE.OrbitControls( camera );
-				controls.target.set( 0, 100, 0 );
+				controls.target.set( 0, 0, 0 );
 				controls.update();
+
+
+
 
 				scene = new THREE.Scene();
 				scene.background = new THREE.Color( 0xa0a0a0 );
-				scene.fog = new THREE.Fog( 0xa0a0a0, 200, 1000 );
+				scene.fog = new THREE.Fog( 0xa0a0a0, 10, 5000 );
 
-				light = new THREE.HemisphereLight( 0xffffff, 0x444444 );
+				light = new THREE.HemisphereLight( 0x111111, 0x111111 );
 				light.position.set( 0, 200, 0 );
 				scene.add( light );
 
@@ -90,27 +120,80 @@
 				// scene.add( new THREE.CameraHelper( light.shadow.camera ) );
 
 				// ground
-				var mesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 2000, 2000 ), new THREE.MeshPhongMaterial( { color: 0x999999, depthWrite: false } ) );
-				mesh.rotation.x = - Math.PI / 2;
-				mesh.receiveShadow = true;
-				scene.add( mesh );
+
 
 				var grid = new THREE.GridHelper( 2000, 20, 0x000000, 0x000000 );
 				grid.material.opacity = 0.2;
 				grid.material.transparent = true;
 				scene.add( grid );
 
-				// model
+				// Model
 
 				var loader = new THREE.FBXLoader();
 
-				loader.load( 'Models/Stone_1.fbx', function ( object ) {
+
+				// *******************************************************
+				/* MATERIAL VARS */
+
+						var Grass = new THREE.MeshPhongMaterial({
+		            specular:0xfffff,
+		            shininess:40,
+								color: 0xffffff,
+		            reflectivity:1,
+			      });
+		        //MAT_01.needsUpdate = true;
+
+						Grass.map = THREE.ImageUtils.loadTexture( 'textures/grass.jpg' );
+
+						var Lightmap_text = THREE.ImageUtils.loadTexture('textures/Stone_1/lm.png');
+						var Main_Texture = THREE.ImageUtils.loadTexture( 'textures/Stone_1/_2.jpg' );
+
+						var Stone = new THREE.MeshLambertMaterial( {
+
+								specular:0xffffff,
+								shininess:40,
+								lightMap:Lightmap_text,
+								map:Main_Texture,
+								color: 0xffffff,
+								reflectivity:1,
+						});
+
+						standardMaterial = new THREE.MeshStandardMaterial( {
+							color: 0xffffff,
+							lightMap:Lightmap_text,
+							map:Main_Texture,
+							metalness: params.metalness,
+							roughness: params.roughness
+						} );
+
+				//		standardMaterial.map =THREE.ImageUtils.loadTexture( 'textures/Stone_1/_2.jpg' );
+						standardMaterial.needsUpdate = true;
+
+						Stone.needsUpdate=true;
+				//*******************************************************
+
+				loader.load( 'Models/MOdel_1_Max_FBX.fbx', function ( object ) {
 //loader.load( '../Threejs/examples/models/fbx/Samba Dancing.fbx', function ( object ) {
 					object.mixer = new THREE.AnimationMixer( object );
 					mixers.push( object.mixer );
 
 		//			var action = object.mixer.clipAction( object.animations[ 0 ] );
 		//			action.play();
+
+							//set material//
+	           object.traverse( function ( child ) {
+	                 if ( child instanceof THREE.Mesh ) {
+										 //alert(child.material.name);
+										 if(child.material.name=='Stone'){
+	                   child.material = Stone;
+									 		}
+
+											if(child.material.name=='Grass'){
+											child.material = Grass;
+											 }
+	                 }
+								 });
+
 
 					object.traverse( function ( child ) {
 
@@ -133,11 +216,65 @@
 				renderer.shadowMap.enabled = true;
 				container.appendChild( renderer.domElement );
 
-				window.addEventListener( 'resize', onWindowResize, false );
+
+//refelection Maps
+var genCubeUrls = function( prefix, postfix ) {
+				return [
+					prefix + 'px' + postfix, prefix + 'nx' + postfix,
+					prefix + 'py' + postfix, prefix + 'ny' + postfix,
+					prefix + 'pz' + postfix, prefix + 'nz' + postfix
+				];
+			};
+
+			var hdrUrls = genCubeUrls( 'textures/cube/pisaHDR/', '.hdr' );
+			new THREE.HDRCubeTextureLoader().load( THREE.UnsignedByteType, hdrUrls, function ( hdrCubeMap ) {
+
+				var pmremGenerator = new THREE.PMREMGenerator( hdrCubeMap );
+				pmremGenerator.update( renderer );
+
+				var pmremCubeUVPacker = new THREE.PMREMCubeUVPacker( pmremGenerator.cubeLods );
+				pmremCubeUVPacker.update( renderer );
+
+				hdrCubeRenderTarget = pmremCubeUVPacker.CubeUVRenderTarget;
+
+				hdrCubeMap.dispose();
+				pmremGenerator.dispose();
+				pmremCubeUVPacker.dispose();
+
+			} );
+//reflection maps
+
+
+
+
 
 				// stats
 				stats = new Stats();
 				container.appendChild( stats.dom );
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.minDistance = 200;
+				controls.maxDistance = 1500;
+
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				var gui = new dat.GUI();
+
+				gui.add( params, 'envMap', [ 'LDR', 'HDR', 'RGBM16' ] );
+				gui.add( params, 'roughness', 0, 1 );
+				gui.add( params, 'metalness', 0, 1 );
+				gui.add( params, 'exposure', 0, 2 );
+				gui.open();
+
+
+//AO parameters
+
+
+
+//AO Parameter
+
+
+
 
 			}
 
@@ -154,7 +291,50 @@
 
 			function animate() {
 
+
+
+
 				requestAnimationFrame( animate );
+
+
+// HDR controls
+if ( standardMaterial !== undefined ) {
+
+				standardMaterial.roughness = params.roughness;
+			standardMaterial.metalness = params.metalness;
+
+
+
+
+				var newEnvMap = standardMaterial.envMap;
+
+				switch( params.envMap ) {
+
+					case 'LDR': newEnvMap = ldrCubeRenderTarget ? ldrCubeRenderTarget.texture : null; break;
+					case 'HDR': newEnvMap = hdrCubeRenderTarget ? hdrCubeRenderTarget.texture : null; break;
+					case 'RGBM16': newEnvMap = rgbmCubeRenderTarget ? rgbmCubeRenderTarget.texture : null; break;
+
+				}
+
+				if ( newEnvMap !== standardMaterial.envMap ) {
+
+					standardMaterial.envMap = newEnvMap;
+					standardMaterial.needsUpdate = true;
+
+				  //floorMaterial.map = newEnvMap;
+					//floorMaterial.needsUpdate = true;
+
+				}
+
+			}
+
+			renderer.toneMappingExposure = params.exposure;
+
+// HDR controls
+
+
+
+
 
 				if ( mixers.length > 0 ) {
 
@@ -166,8 +346,8 @@
 
 				}
 
-				renderer.render( scene, camera );
-
+		 	renderer.render( scene, camera );
+				//omposer.render();
 				stats.update();
 
 			}
